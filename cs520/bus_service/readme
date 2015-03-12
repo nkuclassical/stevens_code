@@ -2,4 +2,4 @@ The coding assignment of Operating System course of Stevens Institute of Technol
 
 In my algorithm, if one bus reach a station where there is a bus boarding passengers, the first one will leave immediately while the later one will continue its unfinished job.
 
-Another useful algorithm is like subway control, but this is not include in this bus-service algorithm. A central control will give all the buses moving order, then all the buses will move together and stop together. This method can maintain the distance between next two buses be constant.
+ Another useful algorithm is like subway control, but this is not include in this bus-service algorithm. A central control will give all the buses moving order, then all the buses will move together and stop together. This method can maintain the distance between next two buses be constant.
