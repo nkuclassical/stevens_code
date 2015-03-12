@@ -1,4 +1,4 @@
-The coding assignment of Operating System course of Stevens Institute of Technology. Buses can be treat as processors, bus station can be treat as different cpu work. Each station will have a random passengers amount, that is similar as the cpu tasks' situation. One of the main challenges is how to avoid buses push at continuous station, since buses can't pass the front buses.
+ The coding assignment of Operating System course of Stevens Institute of Technology. Buses can be treat as processors, bus station can be treat as different cpu work. Each station will have a random passengers amount, that is similar as the cpu tasks' situation. One of the main challenges is how to avoid buses push at continuous station, since buses can't pass the front buses.
 
 In my algorithm, if one bus reach a station where there is a bus boarding passengers, the first one will leave immediately while the later one will continue its unfinished job.
 
