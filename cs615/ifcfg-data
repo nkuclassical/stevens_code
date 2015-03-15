@@ -1,0 +1,38 @@
+#!/bin/sh
+help()
+{
+ cat <<HELP
+ Usage:
+	 ifconfig -a|ifcfg-data -[imn]
+ 
+ Options:
+	 -i: show IP address
+	 -m: show MAC address
+	 -n: show Netmask address
+	 --help: show help information
+HELP
+exit 0
+}
+
+
+arg="$1"
+if [ "$arg" = "--help" ]
+then 
+help
+elif [ "$arg" = "-i" ]
+then
+p='( *(inet|inet6) (addr:)?)((([0-9]{1,3}.){3}[0-9]{1,3})|(:*([0-9a-f/]{1,4}:*)*))(.*)'
+sed -n -E "s/$p/\4/p"
+elif [ "$arg" = "-n" ]
+then
+p='.*(netmask|Mask:|prefixlen) ?((([0-9]{1,3}(.?)){3}[0-9]{1,3})|((0x)?([0-9a-f]+)))(.*)'
+sed -n -E "s/$p/\2/p"
+elif [ "$arg" = "-m" ]
+then 
+p='.*(address:|ether|HWaddr) ?(([0-9a-f]{1,4}:)+[0-9a-f]{1,4})(.*)'
+sed -n -E "s/$p/\2/p"
+else
+echo "Wrong input, we only support -i -m -n."
+exit 1
+fi
+exit 0
