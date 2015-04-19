@@ -140,7 +140,6 @@ detach_volume()
 {
 	echo "detach volume"$VOLUME_ID
 	if [ ! -z $VOLUME_ID ]; then
-		#statements
 		aws ec2 detach-volume --volume-id $VOLUME_ID 1>&2 2>/dev/null
 	fi
 }
@@ -149,12 +148,10 @@ terminate_instance()
 	
 	echo "terminate instance"$INSTANCE_ID
 	if [ ! -z $INSTANCE_ID ]; then
-		#statements
 		local temp=`aws ec2 terminate-instances --instance-ids $INSTANCE_ID`
 	fi
 }
 validate_create_instance() {
-#	echo "Check instance exist"
 	if [ ! -z $INSTANCE_ID ];
 	then
 		local instance_status=$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --output text --filters "Name=instance-id, Values=$INSTANCE_ID" --query 'Reservations[0].[Instances[0].State.Code]')
@@ -172,11 +169,9 @@ validate_create_instance() {
 validate_dir()
 {
 	if [ ! -e $DIR ]; then
-		#statements
 		echo "The directory not exists!"
 		exit 1
 	elif [ -z $DIR ]; then
-			#statements
 			echo "Empty directory path, forget to type in?"
 			exit 1
 	fi
@@ -184,10 +179,8 @@ validate_dir()
 validate_filesystem()
 {
     if [ ! -z $HOST_NAME ]; then
-        #statements
         local filesystem_type=`ssh $EC2_BACKUP_FLAGS_SSH $USER_NAME@$HOST_NAME "sudo file -s $DEVICE_NAME|grep ext4"`
         if [ ! -z filesystem_type ]; then
-            #statements
             return 0
         else
             return 1
@@ -251,7 +244,6 @@ create_instance()
 		exit 1
 	fi
 	while [ -z $HOST_NAME ]; do
-		#statements
 		echo "sleep 5 seconds"
 		sleep 5
 		HOST_NAME=`aws ec2 describe-instances --filters "Name=instance-id, Values=$INSTANCE_ID" --output text --query 'Reservations[0].[Instances[0].PublicDnsName]'`
@@ -276,15 +268,16 @@ create_volume()
 	VOLUME_ID=`aws ec2 create-volume --size 1 --availability us-east-1e --query 'VolumeId'|cut -d\" -f2`
 	echo $VOLUME_ID
 	visual_sleep validate_volume_exist 45
-	local temp=`aws ec2 attach-volume --volume-id $VOLUME_ID --instance $INSTANCE_ID --device $ATTACH_POINT`
-	echo "aws ec2 attach-volume --volume-id $VOLUME_ID --instance $INSTANCE_ID --device $ATTACH_POINT"
+	
+}
+attach_volume()
+{
+    local temp=`aws ec2 attach-volume --volume-id $VOLUME_ID --instance $INSTANCE_ID --device $ATTACH_POINT`
+    echo "aws ec2 attach-volume --volume-id $VOLUME_ID --instance $INSTANCE_ID --device $ATTACH_POINT"
 }
 
-#directorysize=`du -h $dir`
-#create a ubuntu instance
-#createImage "ami-02a9426a"
 
-#sizeofdirectory
+
 dd_backup() {
 	echo "tar -cf - $1 | ssh ${EC2_BACKUP_FLAGS_SSH} -o BatchMode=yes -o StrictHostKeyChecking=no $USER_NAME@$HOST_NAME 'sudo dd of=$DEVICE_NAME' 1>/dev/null 2>/dev/null"
 	local dd_cmd="tar -cPf - $1 | ssh ${EC2_BACKUP_FLAGS_SSH} -o BatchMode=yes -o StrictHostKeyChecking=no $USER_NAME@$HOST_NAME 'sudo dd of=$DEVICE_NAME' 1>/dev/null 2>/dev/null"
@@ -295,24 +288,25 @@ dd_backup() {
 create_filesystem()
 {
 
-    ssh $EC2_BACKUP_FLAGS_SSH -o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=no $USER_NAME@$HOST_NAME  "sudo mkfs -t $FILE_SYSTEM_TYPE $DEVICE_NAME" 1>&2 2>/dev/null
-    visual_sleep validate_filesystem 15
-    ssh $EC2_BACKUP_FLAGS_SSH -o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=no $USER_NAME@$HOST_NAME  "sudo mkdir $DEFAULT_VOLUME_DIR" 1>&2 2>/dev/null
-    ssh $EC2_BACKUP_FLAGS_SSH -o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=no $USER_NAME@$HOST_NAME  "sudo mount $DEVICE_NAME $DEFAULT_VOLUME_DIR" 1>&2 2>/dev/null
+    echo "create filesystem"
+    ssh $EC2_BACKUP_FLAGS_SSH -o ConnectTimeout=30 -o BatchMode=yes -o StrictHostKeyChecking=no $USER_NAME@$HOST_NAME  "sudo mkfs -t $FILE_SYSTEM_TYPE $DEVICE_NAME" 1>&2 2>/dev/null
+    visual_sleep validate_filesystem 30
+    ssh $EC2_BACKUP_FLAGS_SSH -o ConnectTimeout=30 -o BatchMode=yes -o StrictHostKeyChecking=no $USER_NAME@$HOST_NAME  "sudo mkdir $DEFAULT_VOLUME_DIR" 1>&2 2>/dev/null
+    ssh $EC2_BACKUP_FLAGS_SSH -o ConnectTimeout=30 -o BatchMode=yes -o StrictHostKeyChecking=no $USER_NAME@$HOST_NAME  "sudo mount $DEVICE_NAME $DEFAULT_VOLUME_DIR" 1>&2 2>/dev/null
+    echo "finished create filesystem"
 }
 show_rsync_backup_result()
 {
 
     $(ssh $EC2_BACKUP_FLAGS_SSH -o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=no $USER_NAME@$HOST_NAME "sudo DEBIAN_FRONTEND=noninteractive apt-get install tree") 1>&2 2>/dev/null
     echo "directory structure of $DEFAULT_VOLUME_DIR"
-    ssh $EC2_BACKUP_FLAGS_SSH -o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=no $USER_NAME@$HOST_NAME "tree $DEFAULT_VOLUME_DIR"
+    ssh $EC2_BACKUP_FLAGS_SSH -o ConnectTimeout=30 -o BatchMode=yes -o StrictHostKeyChecking=no $USER_NAME@$HOST_NAME "tree $DEFAULT_VOLUME_DIR"
 }
 rsync_backup()
 {
+
     echo "rsync_backup start"
 	create_filesystem
-    #echo "rsync -avzhe ssh $EC2_BACKUP_FLAGS_SSH $DIR $USER_NAME@$HOST_NAME:$DEFAULT_VOLUME_DIR"
-    #rsync -avzhe ssh  $EC2_BACKUP_FLAGS_SSH $DIR -o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=no $USER_NAME@$HOST_NAME:$DEFAULT_VOLUME_DIR
     local rsync_cmd="rsync -e \"ssh ${EC2_BACKUP_FLAGS_SSH}\" --rsync-path=\"sudo rsync\" -avzh $DIR $USER_NAME@$HOST_NAME:$DEFAULT_VOLUME_DIR"
     echo $rsync_cmd
     eval $rsync_cmd
@@ -321,7 +315,6 @@ rsync_backup()
 }
 validate_ssh_connection()
 {
-	echo "validate the ssh connection"
 	ssh $EC2_BACKUP_FLAGS_SSH -o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=no $USER_NAME@$HOST_NAME 'exit' 1>&2 2>/dev/null
 }
 
@@ -371,31 +364,37 @@ parse_command()
     
 
 }
+
 parse_command $@
 if [ ! -z $EXITDIRECTLY ]; then
-    #statements
+    
     exit 0
 fi
 validate_dir
 echo "METHOD: "$METHOD
 echo "DIR: "$DIR
 echo "DEFAULT ATTACH POINT: "$ATTACH_POINT
-EC2_BACKUP_VERBOSE="true"
+if [ ! -z $VOLUME_ID ]; then
+    
+    echo "VOLUME_ID: "$VOLUME_ID
+fi
 create_instance
+
 echo "HOST NAME: "$HOST_NAME
-validate_ssh_connection
-create_volume
+
+visual_sleep validate_ssh_connection 45
+if [ -z $VOLUME_ID ]; then #not given the volume id, program should create one
+    create_volume
+fi
+
+attach_volume
 
 if [ $METHOD = "dd" ]; then
 	#statements
 	dd_backup $DIR
-	else
+else
 		rsync_backup $DIR
 fi
-
-
-detach_volume
-terminate_instance
 echo "Goodbye!"
 exit 0
 
