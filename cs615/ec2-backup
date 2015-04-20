@@ -1,0 +1,450 @@
+#!/bin/bash
+#CS-615 HW5
+
+#All possible variables
+ARGS=("$@")
+
+IMG_ID="ami-d05e75b8"
+
+HOST_IP=""
+
+USER_NAME="ubuntu"
+HOST_NAME=""
+
+SECURITY_KEY=""
+
+SECURITY_GROUP=""
+
+DIR=""
+
+DEVICE_NAME="/dev/xvdh"
+ATTACH_POINT="/dev/sdh"
+DEFAULT_VOLUME_DIR="/ec2-backup"
+FILE_SYSTEM_TYPE="ext4"
+
+VOLUME_SIZE=1
+
+VOLUME_ID=""
+
+METHOD="dd"
+
+#echo help
+echo_help() {
+    echo "EC2-BACKUP(1)       BSD General Commands Manual        EC2-BACKUP(1)
+
+NAME
+     ec2-backup -- backup a directory into Elastic Block Storage (EBS)
+
+SYNOPSIS
+     ec2-backup [-h] [-m method] [-v volume-id] dir
+
+DESCRIPTION
+     The ec2-backup tool performs a backup of the given directory into Amazon
+     Elastic Block Storage (EBS).  This is achieved by creating a volume of
+     the appropriate size, attaching it to an EC2 instance and finally copying
+     the files from the given directory into this volume.
+
+OPTIONS
+     ec2-backup accepts the following command-line flags:
+
+     -h        Print a usage statement and exit.
+
+     -m method     Use the given method to perform the backup.  Valid methods
+           are 'dd' and 'rsync'; default is 'dd'.
+
+     -v volume-id  Use the given volume instead of creating a new one.
+
+DETAILS
+     ec2-backup will perform a backup of the given directory to an ESB volume.
+     The backup is done in one of two ways: via direct write to the volume as
+     a block device (utilizing tar(1) on the local host and dd(1) on the
+     remote instance), or via a (possibly incremental) filesystem sync (uti-
+     lizing rsync(1)).
+
+     Unless the -v flag is specified, ec2-backup will create a new volume, the
+     size of which will be at least two times the size of the directory to be
+     backed up.
+
+     ec2-backup will create an instance suitable to perform the backup, attach
+     the volume in question and then back up the data from the given directory
+     using the specified method and then shut down and terminate the instance
+     it created.
+
+OUTPUT
+     By default, ec2-backup prints the volume ID of the volume to which it
+     backed up the data as the only output.  If the EC2_BACKUP_VERBOSE envi-
+     ronment variable is set, it may also print out some useful information
+     about what steps it is currently performing.
+
+     Any errors encountered cause a meaningful error message to be printed to
+     STDERR.
+
+ENVIRONMENT
+     ec2-backup assumes that the user has set up their environment for general
+     use with the EC2 tools.  That is, it will not set or modify the variables
+     AWS_CONFIG_FILE, EC2_CERT, EC2_HOME or EC2_PRIVATE_KEY.
+
+     ec2-backup allows the user to add custom flags to the commands related to
+     starting a new EC2 instance via the EC2_BACKUP_FLAGS_AWS environment
+     variable.
+
+     ec2-backup also assumes that the user has set up their ~/.ssh/config file
+     to access instances in EC2 via ssh(1) without any additional settings.
+     It does allow the user to add custom flags to the ssh(1) commands it
+     invokes via the EC2_BACKUP_FLAGS_SSH environment variable.
+
+     As noted above, the EC2_BACKUP_VERBOSE variable may cause ec2-backup to
+     generate informational output as it runs.
+
+EXIT STATUS
+     The ec2-backup will exit with a return status of 0 under normal circum-
+     stances.  If an error occurred, ec2-backup will exit with a value >0.
+
+EXAMPLES
+     The following examples illustrate common usage of this tool.
+
+     To back up the entire filesystem using rsync(1):
+
+       $ ec2-backup -m rsync /
+       vol-a1b2c3d4
+       $ echo $?
+       0
+       $
+
+     To create a complete backup of the current working directory using
+     defaults (and thus not requiring a filesystem to exist on the volume) to
+     the volume with the ID vol-1a2b3c4d:
+
+       ec2-backup -v vol-1a2b3c4d .
+
+     Suppose a user has their ~/.ssh/config set up to use the private key
+     ~/.ec2/stevens but wishes to use the key ~/.ssh/ec2-key instead:
+
+       $ export EC2_BACKUP_FLAGS_SSH=\"-i ~/.ssh/ec2-key\"
+       $ ec2-backup .
+       vol-a1b2c3d4
+       $
+
+     To force creation of an instance type of t1.micro instead of whatever
+     defaults might apply
+
+       $ export EC2_BACKUP_FLAGS_AWS=\"--instance-type t1.micro\"
+       $ ec2-backup .
+       vol-a1b2c3d4
+       $
+
+SEE ALSO
+     aws help, dd(1), tar(1), rsync(1)
+
+HISTORY
+     ec2-backup was originally assigned by Jan Schaumann
+     <jschauma@cs.stevens.edu> as a homework assignment for the class \"Aspects
+     of System Administration\" at Stevens Institute of Technology in the
+     Spring of 2011.
+
+BSD             March 17, 2014                 BSD"
+    exit 0
+}
+
+#Echo usage afer error input
+echo_usage() {
+    echo "Usage: ec2-backup [-h] [-m dd/rsync] [-v volume-id] dir"
+    exit 2
+}
+
+run()
+{
+    if [[ $# -eq 1 ]]; then
+        log "Running: $1"
+        eval $1 1>/dev/null 2>/dev/null
+    elif [[ $# -gt 1 ]]; then
+        log "Running: $1"
+        eval "$2=\`$1\`"
+    fi
+}
+
+print_msg()
+{
+    echo $@ | tee -a ec2-backup-log
+}
+
+print_err()
+{
+    echo $@ | tee -a ec2-backup-log >&2
+}
+
+#Add logs into log file. Check EC2_BACKUP_VERBOSE, then echo nessary info
+log()
+{
+    echo $@ >> ec2-backup-log
+    if [[ $EC2_BACKUP_VERBOSE -eq 1 ]]; then
+        echo $@
+    fi
+}
+
+errlog()
+{
+    echo $@ >> ec2-backup-errlog
+    if [[ $EC2_BACKUP_VERBOSE -eq 1 ]]; then
+        echo $@ >&2
+    fi
+}
+visual_sleep() {
+    local max=$2
+    local n
+    local func=$1
+    
+    n=0
+    while [ $n -lt ${max} ]; do
+        
+        if [ ! -z $EC2_BACKUP_VERBOSE ];
+        then
+            printf .        
+        fi
+        
+        n=$(( n + 1 ))
+        $func
+        if [ $? -eq 0 ];
+        then
+            break
+        fi
+        sleep 1
+    done
+    if [ ! -z $EC2_BACKUP_VERBOSE ];
+    then
+        printf "\n"
+    fi
+}
+#read parameters from user input options
+parse_command()
+{
+    if [[ $1 = "-h" ]]; then
+        echo_help
+        exit 0
+    fi
+    for (( i = 0; i < $# - 1; i++ )); do
+        case ${ARGS[i]} in
+            -m )            #method
+                i=`expr $i + 1`
+                if [[ $i = `expr $# - 1` ]]; then
+                    print_err "Missing option 'dir'"
+                    echo_usage
+                elif [[ ${ARGS[i]} = 'dd' ]]; then
+                    METHOD="dd"
+                elif [[ ${ARGS[i]} = 'rsync' ]]; then
+                    METHOD="rsync"
+                else
+                    print_err "Unrecognized option -m ${ARGS[i]}"
+                    echo_usage
+                fi;;
+            -v )            #volume ID
+                i=`expr $i + 1`
+                if [[ $i = `expr $# - 1` ]]; then
+                    print_err "Missing option 'dir'"
+                    echo_usage
+                elif [[ ${ARGS[i]} == vol-* ]]; then
+                    VOLUME_ID=${ARGS[i]}
+                    validate_volume $VOLUME_ID
+                else
+                    print_err "Unrecognized parameter '${ARGS[i]}', the VOLUME-id should start with 'vol-'"
+                    echo_usage
+                fi;;
+            * )
+                print_err "Unrecognized option ${ARGS[i]}"
+                echo_usage
+        esac
+    done
+    #read dir parameter from user input
+    if [[ $# -gt 0 ]]; then
+        DIR=${ARGS[$# - 1]}
+    fi
+    validate_dir
+}
+
+validate_dir()
+{
+    if [ ! -e $DIR ]; then
+        print_err "The directory not exists!"
+        exit 1
+    elif [ -z $DIR ]; then
+            print_err "Please enter existing directory"
+            exit 1
+    fi
+}
+
+create_instance()
+{
+    log "Creating ec2 instance..."
+    run "aws ec2 run-instances --count 1 $EC2_BACKUP_FLAGS_AWS --image-id $IMG_ID --placement AvailabilityZone=us-east-1e --output text --query \"Instances[0].InstanceId\"" INSTANCE_ID
+    if [[ $INSTANCE_ID != i-* ]]; then
+        print_err "Faile to create instance"
+        exit 1
+    fi
+    local COUNT=0
+    while [[ `aws ec2 describe-instances --filters "Name=instance-id, Values=$INSTANCE_ID" --output text --query "Reservations[0].[Instances[0].State.Code]"` !=  16 ]]; do
+        sleep 1
+        COUNT=`expr $COUNT + 1`
+        if [[ $COUNT -gt "30" ]]; then
+            print_err "Timeout: creating instance"
+            exit 1
+        fi
+    done
+    HOST_NAME=`aws ec2 describe-instances --filters "Name=instance-id, Values=$INSTANCE_ID" --output text --query 'Reservations[0].[Instances[0].PublicDnsName]'`
+}
+
+create_volume()
+{
+    log "Calculating the size of directory..."
+    calculate_volume_size
+    if [[ $VOLUME_ID != vol-* ]]; then
+        log "Creating volume..."
+        run "aws ec2 create-volume --size $VOLUME_SIZE --availability us-east-1e --output text --query 'VolumeId'" VOLUME_ID
+    fi
+    local COUNT=0
+    while [[ `aws ec2 describe-volumes --filters Name=volume-id,Values=$VOLUME_ID --output text --query "Volumes[0].State"` != available ]]; do
+        sleep 1
+        COUNT=`expr $COUNT + 1`
+        if [[ $COUNT -gt "30" ]]; then
+            print_err "Timeout: creating volume"
+            exit 1
+        fi
+    done
+}
+
+validate_volume()
+{
+    if [[ $# -eq 1 ]]; then
+        local VOLUME_STATE=""
+        run 'aws ec2 describe-volumes --filters Name=volume-id,Values=$VOLUME_ID --output text --query "Volumes[0].State"' VOLUME_STATE
+        if [[ $VOLUME_STATE != available ]]; then
+            print_err "The volume($VOLUME_ID) is not available"
+            exit 1
+        fi
+    fi
+}
+
+calculate_volume_size()
+{
+    local size=`du -shm $DIR|cut -f1|sed s/M//`
+    log "The size of directory is $size MB"
+    size=`expr $size + $size`
+    size=`expr $size / 1024`
+    #The formula above will ignore decimal, so size need to plus 1
+    size=`expr $size + 1`
+    VOLUME_SIZE=$size
+    log "The size of backup volume should be $VOLUME_SIZE GB"
+}
+
+attach_volume()
+{
+    log "Attaching volume($VOLUME_ID) to instance($INSTANCE_ID)..."
+    run "aws ec2 attach-volume --volume-id $VOLUME_ID --instance-id $INSTANCE_ID --device $ATTACH_POINT"
+    local COUNT=0
+    while [[ `aws ec2 describe-volumes --filters Name=volume-id,Values=$VOLUME_ID --output text --query "Volumes[0].[Attachments[0].State]"` != attached ]]; do
+        sleep 1
+        COUNT=`expr $COUNT + 1`
+        if [[ $COUNT -gt "30" ]]; then
+            print_err "Timeout: attaching volume"
+            exit 1
+        fi
+    done
+}
+
+dd_backup() {
+    log "Backing up by 'dd'"
+    run "tar -cPf - $DIR | ssh ${EC2_BACKUP_FLAGS_SSH} -o BatchMode=yes -o StrictHostKeyChecking=no $USER_NAME@$HOST_NAME 'sudo dd of=$DEVICE_NAME'"
+    log "Successfully backed up"
+}
+
+create_filesystem()
+{
+    log "Creating filesystem"
+    run "ssh $EC2_BACKUP_FLAGS_SSH $USER_NAME@$HOST_NAME  -o BatchMode=yes -o StrictHostKeyChecking=no \"sudo mkfs -t $FILE_SYSTEM_TYPE $DEVICE_NAME\""
+    local COUNT=0
+    while [[ -z `ssh $EC2_BACKUP_FLAGS_SSH  -o BatchMode=yes -o StrictHostKeyChecking=no $USER_NAME@$HOST_NAME "sudo file -s $DEVICE_NAME|grep ext4"` ]]; do
+        sleep 1
+        COUNT=`expr $COUNT + 1`
+        if [[ $COUNT -gt "30" ]]; then
+            print_err "Timeout: creating filesystem"
+            exit 1
+        fi
+    done
+    run "ssh $EC2_BACKUP_FLAGS_SSH $USER_NAME@$HOST_NAME  -o BatchMode=yes -o StrictHostKeyChecking=no \"sudo mkdir $DEFAULT_VOLUME_DIR\""
+    run "ssh $EC2_BACKUP_FLAGS_SSH $USER_NAME@$HOST_NAME  -o BatchMode=yes -o StrictHostKeyChecking=no \"sudo mount $DEVICE_NAME $DEFAULT_VOLUME_DIR\""
+    log "Finished create filesystem"
+}
+
+show_rsync_backup_result()
+{
+
+    $(ssh $EC2_BACKUP_FLAGS_SSH  -o BatchMode=yes -o StrictHostKeyChecking=no $USER_NAME@$HOST_NAME "sudo DEBIAN_FRONTEND=noninteractive apt-get install tree") 1>&2 2>/dev/null
+    echo "directory structure of $DEFAULT_VOLUME_DIR"
+    ssh $EC2_BACKUP_FLAGS_SSH $USER_NAME@$HOST_NAME "tree $DEFAULT_VOLUME_DIR"
+}
+
+rsync_backup()
+{
+
+    log "rsync_backup start"
+    create_filesystem
+    run "rsync -e \"ssh ${EC2_BACKUP_FLAGS_SSH}\" --rsync-path=\"sudo rsync\" -avzh $DIR $USER_NAME@$HOST_NAME:$DEFAULT_VOLUME_DIR"
+    log "rsync_backup finished"
+    if [[ $EC2_BACKUP_VERBOSE -eq 1 ]]; then
+        show_rsync_backup_result
+    fi
+    
+}
+
+validate_ssh_connection()
+{
+    #log "Validating ssh connection...(a little longer)"
+    run "ssh $EC2_BACKUP_FLAGS_SSH  -o BatchMode=yes -o StrictHostKeyChecking=no $USER_NAME@$HOST_NAME 'exit'"
+}
+
+detach_volume()
+{
+    log "detach volume: $VOLUME_ID"
+    if [ ! -z $VOLUME_ID ]; then
+        run "aws ec2 detach-volume --volume-id $VOLUME_ID"
+    fi
+}
+
+terminate_instance()
+{
+    
+    log "terminate instance: $INSTANCE_ID"
+    if [ ! -z $INSTANCE_ID ]; then
+        run "aws ec2 terminate-instances --instance-ids $INSTANCE_ID"
+    fi
+}
+
+#####################################
+#main function
+#####################################
+parse_command $@
+log "Current EC2_BACKUP_FLAGS_AWS: $EC2_BACKUP_FLAGS_AWS"
+log "Current EC2_BACKUP_FLAGS_SSH: $EC2_BACKUP_FLAGS_SSH"
+log "Current EC2_BACKUP_VERBOSE: $EC2_BACKUP_VERBOSE"
+log "Default region: us-east-1e"
+log "Make sure the configurations above were set correctly. Please set EC2_BACKUP_VERBOSE=1 to turn on verbose output"
+log "Log files: ec2-backup-log & ec2-backup-errlog"
+create_instance
+create_volume
+attach_volume
+
+visual_sleep validate_ssh_connection 45
+#validate_ssh_connection
+
+if [ $METHOD = "dd" ]; then
+    #statements
+    dd_backup
+elif [ $METHOD = "rsync" ]; then
+    rsync_backup
+fi
+
+detach_volume
+
+terminate_instance
+
+print_msg "$VOLUME_ID"
+exit 0
