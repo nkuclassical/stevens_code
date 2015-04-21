@@ -159,7 +159,7 @@ run()
         eval $1 1>/dev/null 2>/dev/null
     elif [[ $# -gt 1 ]]; then
         log "Running: $1"
-        eval "$2=\`$1\`"
+        eval "$2=\`$1\`" 1>/dev/null 2>/dev/null
     fi
 }
 
@@ -177,7 +177,7 @@ print_err()
 log()
 {
     echo $@ >> ec2-backup-log
-    if [[ $EC2_BACKUP_VERBOSE -eq 1 ]]; then
+    if [[ ! -z $EC2_BACKUP_VERBOSE ]]; then
         echo $@
     fi
 }
@@ -185,7 +185,7 @@ log()
 errlog()
 {
     echo $@ >> ec2-backup-errlog
-    if [[ $EC2_BACKUP_VERBOSE -eq 1 ]]; then
+    if [[ ! -z $EC2_BACKUP_VERBOSE ]]; then
         echo $@ >&2
     fi
 }
@@ -294,10 +294,11 @@ create_instance()
 
 create_volume()
 {
-    log "Calculating the size of directory..."
-    calculate_volume_size
+    
     if [[ $VOLUME_ID != vol-* ]]; then
         log "Creating volume..."
+        log "Calculating the size of directory..."
+        calculate_volume_size
         run "aws ec2 create-volume --size $VOLUME_SIZE --availability us-east-1e --output text --query 'VolumeId'" VOLUME_ID
     fi
     local COUNT=0
@@ -387,9 +388,10 @@ rsync_backup()
 
     log "rsync_backup start"
     create_filesystem
-    run "rsync -e \"ssh ${EC2_BACKUP_FLAGS_SSH}\" --rsync-path=\"sudo rsync\" -avzh $DIR $USER_NAME@$HOST_NAME:$DEFAULT_VOLUME_DIR"
+    run "rsync -e \"ssh ${EC2_BACKUP_FLAGS_SSH}\" --rsync-path=\"sudo rsync\" -avpzh $DIR $USER_NAME@$HOST_NAME:$DEFAULT_VOLUME_DIR"
+    #run "rsync -e \"ssh ${EC2_BACKUP_FLAGS_SSH}\" --rsync-path=\"sudo rsync\" -aRz --delete $DIR $USER_NAME@$HOST_NAME:$DEFAULT_VOLUME_DIR"
     log "rsync_backup finished"
-    if [[ $EC2_BACKUP_VERBOSE -eq 1 ]]; then
+    if [[ ! -z $EC2_BACKUP_VERBOSE ]]; then
         show_rsync_backup_result
     fi
     
@@ -398,8 +400,10 @@ rsync_backup()
 validate_ssh_connection()
 {
     #log "Validating ssh connection...(a little longer)"
-    run "ssh $EC2_BACKUP_FLAGS_SSH  -o BatchMode=yes -o StrictHostKeyChecking=no $USER_NAME@$HOST_NAME 'exit'"
+#    run "ssh $EC2_BACKUP_FLAGS_SSH  -o BatchMode=yes -o StrictHostKeyChecking=no $USER_NAME@$HOST_NAME 'exit'" 
+   ssh $EC2_BACKUP_FLAGS_SSH -o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=no $USER_NAME@$HOST_NAME 'exit' 1>&2 2>/dev/null
 }
+
 
 detach_volume()
 {
@@ -421,7 +425,7 @@ terminate_instance()
 #####################################
 #main function
 #####################################
-parse_command $@
+parse_command "$@"
 log "Current EC2_BACKUP_FLAGS_AWS: $EC2_BACKUP_FLAGS_AWS"
 log "Current EC2_BACKUP_FLAGS_SSH: $EC2_BACKUP_FLAGS_SSH"
 log "Current EC2_BACKUP_VERBOSE: $EC2_BACKUP_VERBOSE"
@@ -432,6 +436,7 @@ create_instance
 create_volume
 attach_volume
 
+log "Validating ssh connection...(a little longer)"
 visual_sleep validate_ssh_connection 45
 #validate_ssh_connection
 
